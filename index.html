@@ -251,6 +251,16 @@ footer{background:var(--bg);border-top:1px solid var(--border);color:var(--text3
 .gate-pw-back{background:transparent;color:var(--text2);border:1px solid var(--border2) !important}
 .gate-pw-err{font-family:Arial,sans-serif;font-size:0.8rem;color:var(--red);margin-bottom:0.6rem;display:none;text-align:left}
 
+/* Magic link  vs  Email & password tabs inside the sign-in box */
+.gate-auth-tabs{display:flex;gap:0.4rem;margin-bottom:0.9rem}
+.gate-auth-tab{flex:1;background:var(--bg2);border:1px solid var(--border2);color:var(--text2);font-family:Arial,sans-serif;font-size:0.78rem;padding:0.5rem;border-radius:6px;cursor:pointer}
+.gate-auth-tab.active{background:var(--accent);color:white;border-color:var(--accent)}
+/* Small warning text under the magic link button about the 2-per-30-min limit */
+.gate-rate-note{font-family:Arial,sans-serif;font-size:0.74rem;color:var(--text3);margin:0.5rem 0 0;text-align:left;line-height:1.4}
+/* "Save your login" tip shown on the email+username+password panel */
+.gate-pw-tip{font-family:Arial,sans-serif;font-size:0.74rem;color:var(--accent2);background:rgba(124,110,245,0.08);border:1px solid rgba(124,110,245,0.2);border-radius:6px;padding:0.5rem 0.7rem;margin-bottom:0.8rem;text-align:left;line-height:1.4}
+.gate-pwauth-switch{font-family:Arial,sans-serif;font-size:0.78rem;color:var(--accent2);margin-bottom:0.8rem;text-align:left;cursor:pointer;text-decoration:underline}
+
 /* MODERATOR-ONLY UI: the red "Moderator mode" badge + the "Delete review" buttons.
    These only appear on the page when currentRole === 'moderator' in the JavaScript. */
 .mod-badge{display:flex;align-items:center;gap:0.5rem;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);font-family:Arial,sans-serif;font-size:0.78rem;font-weight:bold;padding:0.4rem 0.9rem;border-radius:20px}
@@ -374,19 +384,59 @@ footer{background:var(--bg);border-top:1px solid var(--border);color:var(--text3
          signed in for real. -->
     <div class="gate-pw-box" id="gate-email-box">
       <div class="gate-label" id="gate-email-label">Sign in</div>
-      <div class="gate-pw-err" id="gate-email-err">This email does not have admin privileges.</div>
-      <div class="gate-email-sent" id="gate-email-sent" style="display:none;color:var(--text2);font-family:Arial,sans-serif;font-size:0.85rem;margin-bottom:0.8rem;text-align:left">📧 Magic link sent — check that inbox and click the link to finish signing in.</div>
-      <input type="email" id="gate-email-input" placeholder="you@example.com" autocomplete="off">
-      <!-- MODERATOR-ONLY password field. Hidden for Buyer/Viewer sign-in.
-           The password itself is never checked in this file — it's sent to
-           a Supabase Edge Function (see SETUP_MODERATOR_PASSWORD.md) which
-           verifies it server-side against a secret only the server knows.
-           This box only appears when intent === 'moderator' (see JS). -->
-      <input type="password" id="gate-mod-pw-input" placeholder="Moderator password" autocomplete="off" style="display:none;margin-top:0.6rem">
-      <div class="gate-pw-err" id="gate-mod-pw-err" style="display:none">Incorrect password for moderator.</div>
-      <div class="gate-pw-row">
-        <button class="gate-pw-back" id="gate-email-back">Back</button>
-        <button class="gate-pw-confirm" id="gate-email-confirm">Send magic link</button>
+
+      <!-- Lets the visitor pick between the two sign-in methods. Both lead
+           into the SAME role/permission check afterwards (handleAuthSession) —
+           this just changes HOW they prove who they are. -->
+      <div class="gate-auth-tabs" id="gate-auth-tabs">
+        <button class="gate-auth-tab active" id="tab-magic" type="button" data-tab="magic">Magic link</button>
+        <button class="gate-auth-tab" id="tab-password" type="button" data-tab="password">Email &amp; password</button>
+      </div>
+
+      <!-- ===== MAGIC LINK PANEL (original flow) ===== -->
+      <div id="gate-magic-panel">
+        <div class="gate-pw-err" id="gate-email-err">This email does not have admin privileges.</div>
+        <div class="gate-email-sent" id="gate-email-sent" style="display:none;color:var(--text2);font-family:Arial,sans-serif;font-size:0.85rem;margin-bottom:0.8rem;text-align:left">📧 Magic link sent — check that inbox and click the link to finish signing in.</div>
+        <input type="email" id="gate-email-input" placeholder="you@example.com" autocomplete="off">
+        <!-- MODERATOR-ONLY password field. Hidden for Buyer/Viewer sign-in.
+             The password itself is never checked in this file — it's sent to
+             a Supabase Edge Function (see SETUP_MODERATOR_PASSWORD.md) which
+             verifies it server-side against a secret only the server knows.
+             This box only appears when intent === 'moderator' (see JS). -->
+        <input type="password" id="gate-mod-pw-input" placeholder="Moderator password" autocomplete="off" style="display:none;margin-top:0.6rem">
+        <div class="gate-pw-err" id="gate-mod-pw-err" style="display:none">Incorrect password for moderator.</div>
+        <!-- Heads-up about Supabase's free-tier email rate limit, pointing
+             people at the password tab as the fallback if the link never arrives. -->
+        <div class="gate-rate-note" id="gate-rate-note">⚠️ This may not work because the email login limit is 2 emails per 30 minutes. If it doesn't arrive, switch to "Email &amp; password" above instead.</div>
+        <div class="gate-pw-row">
+          <button class="gate-pw-back" id="gate-email-back" type="button">Back</button>
+          <button class="gate-pw-confirm" id="gate-email-confirm" type="button">Send magic link</button>
+        </div>
+      </div>
+
+      <!-- ===== EMAIL + USERNAME + PASSWORD PANEL (new flow) =====
+           Two modes, toggled by gate-pwauth-switch-link:
+             'signin' → email + password, used to log back into an
+                        existing account (this is how Moderators given
+                        an exact email/username/password by Viraj log in).
+             'signup' → email + username + password, creates a brand new
+                        account via Supabase Auth signUp(). Only offered
+                        for Buyer/Viewer — Moderator accounts are created
+                        once by Viraj and handed out, not self-signed-up. -->
+      <div id="gate-password-panel" style="display:none">
+        <div class="gate-pw-err" id="gate-pwauth-err"></div>
+        <div class="gate-email-sent" id="gate-pwauth-confirm-note" style="display:none;color:var(--text2);font-family:Arial,sans-serif;font-size:0.85rem;margin-bottom:0.8rem;text-align:left">📧 Account created — check that inbox to confirm it, then come back and sign in here.</div>
+        <input type="email" id="gate-pwauth-email" placeholder="you@example.com" autocomplete="off">
+        <input type="text" id="gate-pwauth-username" placeholder="Username" autocomplete="off" style="display:none;margin-top:0.6rem">
+        <input type="password" id="gate-pwauth-password" placeholder="Password" autocomplete="off" style="margin-top:0.6rem">
+        <!-- Tip reminding people to save their login since there's no
+             "forgot password" flow wired up in this file yet. -->
+        <div class="gate-pw-tip" id="gate-pwauth-tip">💡 Tip: save your email, username, and password somewhere safe — you'll need all three to sign back in.</div>
+        <div class="gate-pwauth-switch" id="gate-pwauth-switch-link">New here? Create an account instead</div>
+        <div class="gate-pw-row">
+          <button class="gate-pw-back" id="gate-pwauth-back" type="button">Back</button>
+          <button class="gate-pw-confirm" id="gate-pwauth-confirm" type="button">Sign in</button>
+        </div>
       </div>
     </div>
   </div>
@@ -807,7 +857,7 @@ async function saveBookData() {
    free built-in email sender is rate-limited, so for a real launch
    you'd eventually want to connect your own SMTP provider there too.
    ============================================================ */
-const MODERATOR_EMAILS = ['offcialshadeygamer@gmail.com'];
+const MODERATOR_EMAILS = ['offcialshadeygamer@gmail.com', 'virajteaches@gmail.com'];
 let currentRole = null; // 'buyer' | 'moderator'
 
 /* ============================================================
@@ -1130,6 +1180,11 @@ async function showRoleGate() {
   document.getElementById('gate-email-input').value = '';
   document.getElementById('gate-email-err').style.display = 'none';
   document.getElementById('gate-email-sent').style.display = 'none';
+  document.getElementById('gate-pwauth-email').value = '';
+  document.getElementById('gate-pwauth-username').value = '';
+  document.getElementById('gate-pwauth-password').value = '';
+  document.getElementById('gate-pwauth-err').style.display = 'none';
+  document.getElementById('gate-pwauth-confirm-note').style.display = 'none';
   document.getElementById('role-gate').style.display = 'flex';
 }
 
@@ -1153,6 +1208,7 @@ document.getElementById('role-buyer').addEventListener('click', () => {
   document.getElementById('gate-email-box').dataset.intent = 'buyer';
   document.getElementById('gate-mod-pw-input').style.display = 'none';
   document.getElementById('gate-mod-pw-err').style.display = 'none';
+  resetAuthTabs('buyer');
   document.getElementById('gate-email-input').focus();
 });
 
@@ -1164,6 +1220,7 @@ document.getElementById('role-mod').addEventListener('click', () => {
   document.getElementById('gate-email-box').style.display = 'block';
   document.getElementById('gate-email-box').dataset.intent = 'moderator';
   document.getElementById('gate-mod-pw-input').style.display = 'block';
+  resetAuthTabs('moderator');
   document.getElementById('gate-email-input').focus();
 });
 
@@ -1177,6 +1234,186 @@ document.getElementById('gate-email-back').addEventListener('click', () => {
   document.getElementById('gate-mod-pw-err').style.display = 'none';
   document.getElementById('gate-email-err').style.display = 'none';
   document.getElementById('gate-email-sent').style.display = 'none';
+});
+
+/* ============================================================
+   EMAIL & PASSWORD LOGIN (alternative to the magic link)
+   ============================================================
+   Same idea as the magic link, just a different way to prove
+   it's really you: instead of waiting on an email, you create an
+   account once with an email + username + password, then log
+   back in with that email + password any time.
+
+   - Buyer / Viewer: anyone can tap "New here? Create an account"
+     and self-signup right on the page.
+   - Moderator: there's no self-signup here on purpose — Viraj
+     creates the moderator account once (exact email, username,
+     password) and hands it to whoever needs mod access. They just
+     use "Sign in" with those exact details.
+
+   Both paths end up going through the SAME handleAuthSession()
+   check as the magic link (it fires automatically off Supabase's
+   onAuthStateChange 'SIGNED_IN' event) — so a moderator password
+   login still gets checked against MODERATOR_EMAILS just like
+   before. Nothing about the security model changes, this is just
+   a second front door.
+   ============================================================ */
+let pwAuthMode = 'signin'; // 'signin' | 'signup'
+
+// Switches between the "Magic link" tab and the "Email & password" tab
+function resetAuthTabs(intent) {
+  document.getElementById('tab-magic').classList.add('active');
+  document.getElementById('tab-password').classList.remove('active');
+  document.getElementById('gate-magic-panel').style.display = '';
+  document.getElementById('gate-password-panel').style.display = 'none';
+  document.getElementById('gate-pwauth-email').value = '';
+  document.getElementById('gate-pwauth-username').value = '';
+  document.getElementById('gate-pwauth-password').value = '';
+  document.getElementById('gate-pwauth-err').style.display = 'none';
+  document.getElementById('gate-pwauth-confirm-note').style.display = 'none';
+  // Moderators only ever sign in (no self-signup) — Buyers can do either.
+  setPwAuthMode('signin');
+  document.getElementById('gate-pwauth-switch-link').style.display = intent === 'moderator' ? 'none' : '';
+}
+
+document.getElementById('tab-magic').addEventListener('click', () => {
+  document.getElementById('tab-magic').classList.add('active');
+  document.getElementById('tab-password').classList.remove('active');
+  document.getElementById('gate-magic-panel').style.display = '';
+  document.getElementById('gate-password-panel').style.display = 'none';
+});
+document.getElementById('tab-password').addEventListener('click', () => {
+  document.getElementById('tab-password').classList.add('active');
+  document.getElementById('tab-magic').classList.remove('active');
+  document.getElementById('gate-password-panel').style.display = '';
+  document.getElementById('gate-magic-panel').style.display = 'none';
+});
+
+// Toggles the password panel between "Sign in" (email+password) and
+// "Create account" (email+username+password) modes.
+function setPwAuthMode(mode) {
+  pwAuthMode = mode;
+  const usernameInput = document.getElementById('gate-pwauth-username');
+  const switchLink = document.getElementById('gate-pwauth-switch-link');
+  const confirmBtn = document.getElementById('gate-pwauth-confirm');
+  if (mode === 'signup') {
+    usernameInput.style.display = 'block';
+    switchLink.textContent = 'Already have an account? Sign in instead';
+    confirmBtn.textContent = 'Create account';
+  } else {
+    usernameInput.style.display = 'none';
+    switchLink.textContent = 'New here? Create an account instead';
+    confirmBtn.textContent = 'Sign in';
+  }
+}
+document.getElementById('gate-pwauth-switch-link').addEventListener('click', () => {
+  setPwAuthMode(pwAuthMode === 'signin' ? 'signup' : 'signin');
+});
+
+document.getElementById('gate-pwauth-back').addEventListener('click', () => {
+  document.getElementById('gate-email-box').style.display = 'none';
+  document.getElementById('gate-role-list').style.display = '';
+});
+
+// Creates a brand-new account: stores the username in the user's
+// Supabase Auth metadata so it's there if you ever want to display it.
+async function signUpWithPassword(email, username, password) {
+  const errEl = document.getElementById('gate-pwauth-err');
+  const noteEl = document.getElementById('gate-pwauth-confirm-note');
+  errEl.style.display = 'none';
+  // SECURITY: never let self-signup create an account on a moderator email.
+  // Without this check, anyone could type in a MODERATOR_EMAILS address and
+  // "claim" it with their own password before the real moderator signs up,
+  // and end up with mod powers. Moderator accounts must be created directly
+  // in the Supabase dashboard by Viraj — never through this public form.
+  if (MODERATOR_EMAILS.map(m => m.toLowerCase()).includes(email.toLowerCase())) {
+    dlog('error', `Blocked signup attempt on reserved moderator email: ${email}`);
+    errEl.textContent = 'This email is reserved for a moderator account. Contact the site owner for access.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!username) {
+    errEl.textContent = 'Pick a username.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (password.length < 6) {
+    errEl.textContent = 'Password needs to be at least 6 characters.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const intent = document.getElementById('gate-email-box').dataset.intent || 'buyer';
+  localStorage.setItem('novelshift_login_intent', intent);
+  dlog('info', `Creating account for ${email}...`);
+  const { data, error } = await sb.auth.signUp({
+    email, password,
+    options: { data: { username } }
+  });
+  if (error) {
+    dlog('error', `Sign up failed: ${error.message}`);
+    errEl.textContent = error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+  if (data.session) {
+    // Email confirmations are off in this Supabase project, so the
+    // new account is signed in immediately — handleAuthSession takes it from here.
+    dlog('success', `Account created and signed in as ${email}.`);
+  } else {
+    // Email confirmations are ON — they have to click a link first, same idea as the magic link.
+    dlog('info', `Account created for ${email}, awaiting email confirmation.`);
+    noteEl.style.display = 'block';
+  }
+}
+
+// Logs back into an existing email+password account.
+async function signInWithPassword(email, password) {
+  const errEl = document.getElementById('gate-pwauth-err');
+  errEl.style.display = 'none';
+  const intent = document.getElementById('gate-email-box').dataset.intent || 'buyer';
+  localStorage.setItem('novelshift_login_intent', intent);
+  dlog('info', `Signing in as ${email}...`);
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    dlog('error', `Sign in failed: ${error.message}`);
+    errEl.textContent = 'Incorrect email or password.';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Success → onAuthStateChange fires 'SIGNED_IN' → handleAuthSession runs
+  // the same buyer/moderator check used by the magic link.
+}
+
+document.getElementById('gate-pwauth-confirm').addEventListener('click', async () => {
+  const email = document.getElementById('gate-pwauth-email').value.trim();
+  const username = document.getElementById('gate-pwauth-username').value.trim();
+  const password = document.getElementById('gate-pwauth-password').value;
+  const errEl = document.getElementById('gate-pwauth-err');
+  errEl.style.display = 'none';
+  if (!email || !email.includes('@')) {
+    errEl.textContent = 'Enter a valid email address.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!password) {
+    errEl.textContent = 'Enter a password.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const btn = document.getElementById('gate-pwauth-confirm');
+  btn.disabled = true;
+  if (pwAuthMode === 'signup') {
+    btn.textContent = 'Creating account...';
+    await signUpWithPassword(email, username, password);
+  } else {
+    btn.textContent = 'Signing in...';
+    await signInWithPassword(email, password);
+  }
+  btn.disabled = false;
+  btn.textContent = pwAuthMode === 'signup' ? 'Create account' : 'Sign in';
+});
+document.getElementById('gate-pwauth-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('gate-pwauth-confirm').click();
 });
 
 // Sends the real magic link via Supabase Auth to whatever email was typed in.
